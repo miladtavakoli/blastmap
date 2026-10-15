@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>آزمایش ترکیدن</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lalezar&family=Vazirmatn:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div id="map" aria-label="نقشه"></div>
+
+  <aside id="panel">
+    <button id="sheetHandle" aria-label="کوچک و بزرگ کردن پنل" aria-expanded="true"></button>
+
+    <header class="brand">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <div>
+        <h1>نقشه ترکیدن</h1>
+        <p>شعاع اثر انفجار را روی نقشه ببینید</p>
+      </div>
+    </header>
+
+    <form id="searchForm" class="search" role="search">
+      <input id="search" placeholder="جست‌وجوی مکان یا کلیک روی نقشه" autocomplete="off">
+      <button type="submit" aria-label="جست‌وجو">
+        <svg viewBox="0 0 24 24" width="18" height="18"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </form>
+
+    <section class="block">
+      <label for="preset" class="lbl">نوع مهمات</label>
+      <div class="select-wrap"><select id="preset"></select></div>
+
+      <div class="tnt">
+        <label for="tnt" class="lbl">معادل TNT</label>
+        <div class="tnt-input">
+          <input id="tnt" value="250" inputmode="decimal" autocomplete="off">
+          <select id="unit" aria-label="واحد">
+            <option value="1">کیلوگرم</option>
+            <option value="1000">تن</option>
+            <option value="1000000">کیلوتن</option>
+            <option value="1000000000">مگاتن</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="seg" role="radiogroup" aria-label="نوع انفجار">
+        <label><input type="radio" name="burst" value="surface" checked><span>انفجار سطحی</span></label>
+        <label><input type="radio" name="burst" value="air"><span>انفجار هوایی</span></label>
+        <label><input type="radio" name="burst" value="buried"><span>سنگرشکن (زیرسطحی)</span></label>
+        <label><input type="radio" name="burst" value="cluster"><span>خوشه‌ای</span></label>
+      </div>
+
+      <div id="clusterOpts" class="block" hidden>
+        <div class="tnt">
+          <label for="count" class="lbl">تعداد زیرمهمات</label>
+          <div class="tnt-input"><input id="count" type="number" min="1" max="2000" step="1" value="202" inputmode="numeric"></div>
+        </div>
+        <div class="tnt">
+          <label for="spread" class="lbl">شعاع پراکندگی</label>
+          <div class="tnt-input"><input id="spread" type="number" min="1" step="any" value="140" inputmode="decimal"><span>متر</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="lbl-row">
+        <span class="lbl">نواحی اثر</span>
+        <span id="coord" class="coord">نقطه‌ای انتخاب نشده</span>
+      </div>
+      <div id="legend"></div>
+    </section>
+
+    <div class="actions">
+      <button id="saveBtn" class="primary">ذخیره سناریو</button>
+      <button id="shareBtn" class="ghost">کپی لینک</button>
+      <button id="clearBtn" class="ghost icon" aria-label="پاک کردن نقطه">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <details class="fold">
+      <summary>سناریوهای ذخیره‌شده <span id="scCount" class="count"></span></summary>
+      <ul id="scenarios"></ul>
+    </details>
+
+    <details class="fold">
+      <summary>افزودن مهمات به فهرست</summary>
+      <div class="add">
+        <input id="newName" placeholder="نام">
+        <input id="newTnt" type="number" min="0.1" step="any" placeholder="TNT (kg)">
+        <button id="addPresetBtn" class="ghost">افزودن</button>
+      </div>
+    </details>
+
+    <p class="disclaimer">
+      مدل ساده‌ی مقیاس‌بندی مکعبی. اثر ساختمان‌ها، ناهمواری، ترکش و نوع سازه لحاظ نشده؛
+      سنگرشکن فقط موج سطحیِ کاهش‌یافته را نشان می‌دهد، نه آسیب زیرزمینی. زیرمهمات عمل‌نکرده‌ی خوشه‌ای
+      تا مدت‌ها خطرناک‌اند؛ به آن‌ها نزدیک نشوید.
+      اعداد تقریبی و صرفاً برای آموزش و آگاهی پدافند غیرعامل‌اند.
+    </p>
+  </aside>
+
+  <div class="tiles-toggle" role="group" aria-label="سبک نقشه">
+    <button data-tiles="gray" class="on">ساده</button>
+    <button data-tiles="color">رنگی</button>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

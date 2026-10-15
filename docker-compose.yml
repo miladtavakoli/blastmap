@@ -1,0 +1,13 @@
+services:
+  blastmap:
+    build: .
+    image: blastmap:latest
+    container_name: blastmap
+    ports:
+      - "8071:8000"
+    volumes:
+      - blastmap-data:/data
+    restart: unless-stopped
+
+volumes:
+  blastmap-data:
