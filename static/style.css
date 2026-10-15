@@ -1,30 +1,65 @@
 :root {
   --paper: #eef1f0;
   --surface: rgba(250, 251, 251, 0.94);
-  --ink: #172430;
-  --ink-2: #4a5964;
-  --ink-3: #7d8a92;
-  --line: #d3dadc;
-  --field: #e4e9ea;
+  /* text on glass: translucent ink keeps its contrast whatever shows through */
+  --ink: #0f1b24;
+  --ink-2: rgba(15, 27, 36, .74);
+  --ink-3: rgba(15, 27, 36, .56);
+  --line: rgba(15, 27, 36, .1);
+  --field: rgba(255, 255, 255, .3);
+  /* a faint dark outline under the white top highlight, so fields keep their shape on near-white glass */
+  --field-rim: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 0 0 1px rgba(15, 27, 36, .08), 0 1px 2px rgba(15, 27, 36, .05);
+  --chip: rgba(255, 255, 255, .9);
+  --chip-rim: inset 0 1px 0 #fff, 0 2px 8px rgba(15, 27, 36, .12);
   --accent: #1f5f73;
   --accent-ink: #ffffff;
   --shadow: 0 1px 2px rgba(23, 36, 48, .08), 0 12px 32px rgba(23, 36, 48, .14);
-  --r-lg: 18px;
-  --r-md: 10px;
-  --r-sm: 7px;
+  /* bubble glass for the floating chrome (panel, map-style switch, replay bar):
+     a thin tint over a blurred backdrop whose brightness is pinned by the filter,
+     and a rim of inset highlights that gives the edges their thickness */
+  --glass: linear-gradient(160deg, rgba(255, 255, 255, .45), rgba(255, 255, 255, .24) 55%, rgba(255, 255, 255, .34));
+  --glass-blur: blur(28px) saturate(190%) brightness(1.08);
+  --glass-edge: rgba(255, 255, 255, .55);
+  --glass-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, .9),
+    inset 0 -1px 0 rgba(255, 255, 255, .35),
+    inset 1px 0 0 rgba(255, 255, 255, .4),
+    inset -1px 0 0 rgba(255, 255, 255, .25),
+    inset 0 0 22px rgba(255, 255, 255, .35),
+    0 2px 6px rgba(15, 27, 36, .08),
+    0 22px 50px rgba(15, 27, 36, .22);
+  --halo: none;
+  --r-lg: 26px;
+  --r-md: 14px;
+  --r-sm: 10px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --paper: #10181f;
     --surface: rgba(22, 32, 41, 0.94);
-    --ink: #e7edef;
-    --ink-2: #aab6bc;
-    --ink-3: #74838b;
-    --line: #2b3a45;
-    --field: #1d2a34;
+    --ink: #f3f7f8;
+    --ink-2: rgba(255, 255, 255, .78);
+    --ink-3: rgba(255, 255, 255, .6);
+    --line: rgba(255, 255, 255, .12);
+    --field: rgba(255, 255, 255, .1);
+    --field-rim: inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 0 0 1px rgba(255, 255, 255, .07);
+    --chip: rgba(255, 255, 255, .2);
+    --chip-rim: inset 0 1px 0 rgba(255, 255, 255, .3), 0 2px 8px rgba(0, 0, 0, .3);
     --accent: #5fb3c9;
     --accent-ink: #0b1a21;
     --shadow: 0 12px 40px rgba(0, 0, 0, .45);
+    /* brightness(.5) darkens whatever is behind (the 3D map stays light), so the tint can stay thin */
+    --glass: linear-gradient(160deg, rgba(30, 42, 52, .5), rgba(12, 18, 24, .4) 55%, rgba(20, 30, 38, .48));
+    --glass-blur: blur(28px) saturate(170%) brightness(.5);
+    --glass-edge: rgba(255, 255, 255, .16);
+    --glass-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, .28),
+      inset 0 -1px 0 rgba(255, 255, 255, .08),
+      inset 1px 0 0 rgba(255, 255, 255, .1),
+      inset -1px 0 0 rgba(255, 255, 255, .06),
+      inset 0 0 22px rgba(255, 255, 255, .07),
+      0 22px 56px rgba(0, 0, 0, .55);
+    --halo: 0 1px 2px rgba(0, 0, 0, .35);
   }
 }
 
@@ -54,13 +89,17 @@ body {
   z-index: 1000;
   display: flex; flex-direction: column; gap: 18px;
   padding: 22px 20px 18px;
-  background: var(--surface);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow);
-  overflow-y: auto;
+  overflow: hidden auto; /* never scroll sideways: fixed width, content wraps or clips */
   scrollbar-width: thin;
+}
+#panel, .tiles-toggle, .sim-bar {
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  text-shadow: var(--halo);
 }
 #sheetHandle, .sheet-btns { display: none; }
 
@@ -87,6 +126,7 @@ input, select {
   border: 1px solid transparent;
   background: var(--field);
   border-radius: var(--r-md);
+  box-shadow: var(--field-rim);
   padding: 10px 12px;
   outline: none;
   transition: border-color .15s, background .15s;
@@ -127,9 +167,10 @@ option, optgroup { background: var(--paper); color: var(--ink); }
 .tnt-input {
   display: flex; align-items: center; gap: 8px;
   background: var(--field); border-radius: var(--r-md);
-  padding: 0 12px 0 0; border: 1px solid transparent;
+  padding: 0 12px 0 0; border: 1px solid transparent; box-shadow: var(--field-rim);
   max-width: 220px;
 }
+.tnt-input input, .tnt-input select { box-shadow: none; }
 .tnt-input:focus-within { border-color: var(--accent); background: transparent; }
 .tnt-input input {
   background: transparent; border: 0; padding: 9px 0;
@@ -145,13 +186,16 @@ option, optgroup { background: var(--paper); color: var(--ink); }
 .seg {
   display: grid; grid-template-columns: 1fr 1fr;
   background: var(--field); border-radius: var(--r-md); padding: 3px; gap: 2px;
+  box-shadow: var(--field-rim);
 }
-.seg input { position: absolute; opacity: 0; pointer-events: none; }
+/* hidden radios: sized to their own label, not the panel (they inherit input's width: 100%) */
+.seg label { position: relative; }
+.seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
 .seg span {
   display: block; text-align: center; padding: 7px 0; border-radius: var(--r-sm);
   cursor: pointer; color: var(--ink-2); transition: background .15s, color .15s;
 }
-.seg input:checked + span { background: var(--surface); color: var(--ink); font-weight: 500; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.seg input:checked + span { background: var(--chip); color: var(--ink); font-weight: 500; box-shadow: var(--chip-rim); }
 .seg input:focus-visible + span { outline: 2px solid var(--accent); }
 
 /* ---------- legend: the scale ruler ---------- */
@@ -202,7 +246,7 @@ body:not(.mode-3d) #damage3d { display: none; }
 }
 .primary { flex: 1; background: var(--accent); color: var(--accent-ink); }
 .primary:hover { filter: brightness(1.08); }
-.ghost { background: var(--field); color: var(--ink); }
+.ghost { background: var(--field); color: var(--ink); box-shadow: var(--field-rim); }
 .ghost:hover { background: var(--line); }
 .icon { width: 42px; padding: 0 !important; display: grid; place-items: center; }
 
@@ -248,14 +292,13 @@ body:not(.mode-3d) #damage3d { display: none; }
 /* ---------- map chrome ---------- */
 .tiles-toggle {
   position: fixed; left: 16px; top: 16px; z-index: 1000;
-  display: flex; background: var(--surface); border-radius: var(--r-md);
-  padding: 3px; box-shadow: var(--shadow); backdrop-filter: blur(10px);
+  display: flex; border-radius: var(--r-md); padding: 3px;
 }
 .tiles-toggle button {
   border: 0; background: transparent; padding: 6px 12px; border-radius: var(--r-sm);
   cursor: pointer; color: var(--ink-2); font-size: 12.5px;
 }
-.tiles-toggle button.on { background: var(--field); color: var(--ink); font-weight: 500; }
+.tiles-toggle button.on { background: var(--chip); color: var(--ink); font-weight: 500; box-shadow: var(--chip-rim); }
 
 .leaflet-control-zoom { border: 0 !important; box-shadow: var(--shadow) !important; border-radius: var(--r-md) !important; overflow: hidden; }
 .leaflet-control-zoom a { background: var(--surface) !important; color: var(--ink) !important; border-color: var(--line) !important; }
@@ -287,8 +330,7 @@ body.mode-3d #map { visibility: hidden; }
   position: fixed; left: 16px; bottom: 24px; z-index: 1000;
   display: flex; align-items: center; gap: 12px;
   padding: 6px 14px 6px 6px; max-width: calc(100vw - 420px);
-  background: var(--surface); border-radius: var(--r-md); box-shadow: var(--shadow);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--r-md);
 }
 body:not(.mode-3d) .sim-bar { display: none; }
 .sim-bar button {
@@ -334,7 +376,7 @@ body.mode-3d .sim-bar { margin-left: 52px; } /* clear of the zoom/compass button
   .sheet-btns button {
     width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--r-sm);
     background: var(--field); color: var(--ink-2); cursor: pointer;
-    display: grid; place-items: center;
+    display: grid; place-items: center; box-shadow: var(--field-rim);
   }
   .sheet-btns svg { transition: transform .2s; }
   /* arrows point the way the next tap moves the panel */
@@ -345,8 +387,17 @@ body.mode-3d .sim-bar { margin-left: 52px; } /* clear of the zoom/compass button
   .mark i:nth-child(2) { width: 19px; height: 19px; }
   .mark i:nth-child(3) { width: 9px; height: 9px; }
   .tiles-toggle { top: 12px; left: 12px; }
-  .sim-bar { top: 60px; bottom: auto; left: 12px; right: 12px; max-width: none; }
+  /* top-right corner, across from the map-style switch; play icon only, text shrinks to fit */
+  .sim-bar {
+    top: 12px; right: 12px; bottom: auto; left: auto;
+    max-width: calc(100vw - 210px); padding: 4px 4px 4px 10px; gap: 8px;
+  }
   body.mode-3d .sim-bar { margin-left: 0; }
+  .sim-bar button { padding: 10px; }
+  .sim-bar button span { display: none; }
+  .sim-meta { line-height: 1.3; }
+  #simClock { font-size: 11.5px; }
+  #simSpeed { font-size: 10.5px; }
   .leaflet-top.leaflet-right { top: 0; }
   .toast { left: 16px; right: 16px; bottom: auto; top: 60px; text-align: center; }
   .add { grid-template-columns: 1fr 1fr; }
