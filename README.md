@@ -40,9 +40,15 @@ heights from [OpenFreeMap](https://openfreemap.org) (no API key). Picking a poin
   Their timing uses an approximate arrival-time curve with the same cube-root scaling as the
   radii, and the playback bar shows the real elapsed time. The front always takes about 3 seconds
   on screen, so small charges are slowed down and nuclear ones sped up (the bar says by how much).
-- **Zones and buildings:** each zone ring appears when the front reaches it. Buildings in the
-  total and heavy zones collapse to rubble or half height; moderate and light zones are tinted.
-  A cluster strike does this per submunition, with impacts spread over about 0.8 s.
+- **Buildings and places:** as the front reaches each building it gives way. In the
+  total-destruction zone it is levelled to rubble; in the heavy zone the upper floors come down;
+  in the moderate zone roofs and facades are torn off; in the light zone only the colour changes
+  (broken windows). Debris is thrown away from the blast, collapse dust rises, and fires keep
+  burning in the rubble. Map labels of places in the heavy zone disappear once the front passes.
+  Affected named places (hospitals, schools, …) are marked on the map and listed in the panel with
+  a building count per zone. These counts only cover map tiles already loaded, and buildings only
+  exist from zoom 13, so the camera never zooms out further than that. A cluster strike does this
+  per submunition, with impacts spread over about 0.8 s.
 - **Fireball, dust, smoke:** a flash, fireball, dust wall and smoke plume. From 1 kt up, the
   fireball rises into a mushroom cloud; a bunker buster throws up dirt; an air burst detonates
   above the ground. These shapes and sizes are illustrative only, not modeled.
