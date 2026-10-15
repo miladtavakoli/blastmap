@@ -12,6 +12,7 @@ const layer = L.layerGroup().addTo(map);
 let point = null;
 let presets = [];
 let firstDraw = true;
+let lastZones = [], lastSpots = []; // what the 3D view needs to replay the last draw
 
 const faNum = (n, d = 0) => Number(n).toLocaleString("fa-IR", { maximumFractionDigits: d });
 const fmtDist = (m) =>
@@ -59,12 +60,50 @@ async function api(url, opts = {}) {
 }
 
 // ---------- tiles toggle ----------
-document.querySelectorAll(".tiles-toggle button").forEach((b) =>
+const tileButtons = [...document.querySelectorAll(".tiles-toggle button")];
+const markTiles = (v) => tileButtons.forEach((x) => x.classList.toggle("on", x.dataset.tiles === v));
+let view3d = null; // the 3D module once loaded (static/map3d.js)
+const in3d = () => document.body.classList.contains("mode-3d");
+
+async function enter3d() {
+  markTiles("3d");
+  try {
+    view3d ||= await import("./map3d.js");
+    view3d.show(point, lastZones, tntKg(), burst(), lastSpots);
+    await view3d.enter(map.getCenter() && [map.getCenter().lat, map.getCenter().lng], map.getZoom() - 1);
+    updateUrl();
+  } catch (e) {
+    console.error(e);
+    document.body.classList.remove("mode-3d");
+    markTiles(document.body.classList.contains("tiles-gray") ? "gray" : "color");
+    toast("نمای سه‌بعدی در این مرورگر یا شبکه در دسترس نیست");
+  }
+}
+function exit3d(tiles) {
+  const v = view3d?.exit();
+  if (v) map.setView(v.center, Math.round(v.zoom), { animate: false });
+  map.invalidateSize();
+  markTiles(tiles);
+  document.body.classList.toggle("tiles-gray", tiles === "gray");
+  updateUrl();
+}
+tileButtons.forEach((b) =>
   b.addEventListener("click", () => {
-    document.querySelectorAll(".tiles-toggle button").forEach((x) => x.classList.toggle("on", x === b));
+    if (b.dataset.tiles === "3d") return in3d() || enter3d();
+    if (in3d()) return exit3d(b.dataset.tiles);
+    markTiles(b.dataset.tiles);
     document.body.classList.toggle("tiles-gray", b.dataset.tiles === "gray");
   })
 );
+$("simReplay").addEventListener("click", () => view3d?.replay());
+// the 3D map reports clicks here
+window.blastApp = {
+  setPoint(lat, lng) {
+    point = [lat, lng];
+    if (window.innerWidth <= 720) setSheet(0);
+    draw();
+  },
+};
 
 // ---------- mobile sheet ----------
 // tap the handle: minimize ↔ open; swipe up/down on it: step between minimized / half / full
@@ -183,6 +222,7 @@ async function draw() {
   layer.clearLayers();
   if (!(tnt > 0)) {
     $("legend").innerHTML = '<div class="empty">معادل TNT را وارد کنید.</div>';
+    view3d?.show(null);
     return;
   }
 
@@ -203,11 +243,14 @@ async function draw() {
 
   if (!point) {
     $("coord").textContent = "نقطه‌ای انتخاب نشده";
+    view3d?.show(null);
     return;
   }
   $("coord").textContent = `${point[0].toFixed(4)}, ${point[1].toFixed(4)}`;
 
   const spots = cluster ? scatter(+$("count").value, +$("spread").value) : [];
+  lastZones = zones; lastSpots = spots;
+  view3d?.show(point, zones, tnt, burst(), spots);
   const mPerDegLng = 111320 * Math.cos((point[0] * Math.PI) / 180);
   [...zones].reverse().forEach((z, i) => {
     if (z.each) {
@@ -256,6 +299,7 @@ map.on("click", (e) => {
 $("clearBtn").addEventListener("click", () => {
   point = null;
   layer.clearLayers();
+  view3d?.show(null);
   $("coord").textContent = "نقطه‌ای انتخاب نشده";
   history.replaceState(null, "", location.pathname);
 });
@@ -284,6 +328,7 @@ function updateUrl() {
     lat: point[0].toFixed(5), lng: point[1].toFixed(5), tnt: tntKg(), burst: burst(),
   });
   if (burst() === "cluster") { p.set("count", $("count").value); p.set("spread", $("spread").value); }
+  if (in3d()) p.set("view", "3d");
   history.replaceState(null, "", `?${p}`);
 }
 $("shareBtn").addEventListener("click", async () => {
@@ -358,6 +403,7 @@ $("saveBtn").addEventListener("click", async () => {
     map.setView(point, 15, { animate: false });
   }
   syncPresetFromTnt();
-  draw();
+  await draw();
   loadScenarios();
+  if (q.get("view") === "3d") enter3d();
 })();

@@ -27,6 +27,26 @@ python app.py
 The SQLite database is created on first start and filled with the built-in presets. Set
 `BLASTMAP_DB` to store it somewhere other than `./blastmap.db`.
 
+## 3D view
+
+The map-style switch has a third option, **سه‌بعدی** (3D). It loads only when chosen
+(MapLibre GL 4.7.1 + three.js 0.169, from unpkg) and opens a tilted map with real building
+heights from [OpenFreeMap](https://openfreemap.org) (no API key). Picking a point plays the blast:
+
+- **Shock front:** a translucent shell and a ground ring grow out to the light-damage radius.
+  Their timing uses an approximate arrival-time curve with the same cube-root scaling as the
+  radii, and the playback bar shows the real elapsed time. The front always takes about 3 seconds
+  on screen, so small charges are slowed down and nuclear ones sped up (the bar says by how much).
+- **Zones and buildings:** each zone ring appears when the front reaches it. Buildings in the
+  total and heavy zones collapse to rubble or half height; moderate and light zones are tinted.
+  A cluster strike does this per submunition, with impacts spread over about 0.8 s.
+- **Fireball, dust, smoke:** a flash, fireball, dust wall and smoke plume. From 1 kt up, the
+  fireball rises into a mushroom cloud; a bunker buster throws up dirt; an air burst detonates
+  above the ground. These shapes and sizes are illustrative only, not modeled.
+
+`?view=3d` in a shared link opens the 3D view. With reduced motion turned on, it skips straight
+to the end state.
+
 ## What it shows
 
 Each zone is a ring with a peak-overpressure threshold:
