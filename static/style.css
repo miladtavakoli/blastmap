@@ -174,6 +174,26 @@ option, optgroup { background: var(--paper); color: var(--ink); }
 }
 .empty { color: var(--ink-3); font-size: 13px; padding: 6px 0; }
 
+/* ---------- damage report (3D) ---------- */
+.dmg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.dmg-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: var(--field); border-radius: var(--r-sm); font-size: 12.5px;
+}
+.dmg-row i, .dmg-places i { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dmg-row span { color: var(--ink-2); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dmg-row b { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dmg-places { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.dmg-places li {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center;
+  padding: 6px 10px; border-radius: var(--r-sm); cursor: pointer;
+}
+.dmg-places li:hover { background: var(--field); }
+.dmg-places span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dmg-places small { grid-column: 2; color: var(--ink-3); font-size: 11.5px; }
+.dmg-note { margin: 0; font-size: 11.5px; color: var(--ink-3); }
+body:not(.mode-3d) #damage3d { display: none; }
+
 /* ---------- actions ---------- */
 .actions { display: flex; gap: 8px; }
 .actions button, .add button {
