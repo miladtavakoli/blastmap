@@ -2,6 +2,7 @@
 BlastMap — ابزار آموزشی نمایش شعاع اثر انفجار روی OpenStreetMap
 Flask + SQLite. محاسبات تقریبی و صرفاً آموزشی است.
 """
+import hashlib
 import os
 import sqlite3
 from datetime import datetime
@@ -14,6 +15,17 @@ DB_PATH = Path(os.environ.get("BLASTMAP_DB", BASE_DIR / "blastmap.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
+
+# نسخه‌ی فایل‌های static؛ با هر تغییر عوض می‌شود تا CDN (ArvanCloud) و مرورگر نسخه‌ی کهنه ندهند
+STATIC_VERSION = hashlib.sha1(
+    b"".join(p.read_bytes() for p in sorted((BASE_DIR / "static").iterdir()) if p.is_file())
+).hexdigest()[:10]
+
+
+@app.url_defaults
+def bust_static_cache(endpoint, values):
+    if endpoint == "static":
+        values.setdefault("v", STATIC_VERSION)
 
 # فاصله‌ی مقیاس‌شده Z (m / kg^(1/3)) برای هر ناحیه — تقریبی از منحنی‌های Kingery-Bulmash (انفجار سطحی)
 ZONES = [

@@ -63,12 +63,14 @@ async function api(url, opts = {}) {
 const tileButtons = [...document.querySelectorAll(".tiles-toggle button")];
 const markTiles = (v) => tileButtons.forEach((x) => x.classList.toggle("on", x.dataset.tiles === v));
 let view3d = null; // the 3D module once loaded (static/map3d.js)
+// ?v=… from this script's URL, so map3d.js is cache-busted together with app.js
+const STATIC_V = new URL(document.currentScript.src).search;
 const in3d = () => document.body.classList.contains("mode-3d");
 
 async function enter3d() {
   markTiles("3d");
   try {
-    view3d ||= await import("./map3d.js");
+    view3d ||= await import(`./map3d.js${STATIC_V}`);
     view3d.show(point, lastZones, tntKg(), burst(), lastSpots);
     await view3d.enter(map.getCenter() && [map.getCenter().lat, map.getCenter().lng], map.getZoom() - 1);
     updateUrl();
