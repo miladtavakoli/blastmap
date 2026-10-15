@@ -11,6 +11,8 @@
 </head>
 <body>
   <div id="map" aria-label="نقشه"></div>
+  <div id="map3d" aria-label="نقشه‌ی سه‌بعدی"></div>
+  <div id="flash" aria-hidden="true"></div>
 
   <aside id="panel">
     <button id="sheetHandle" aria-label="کوچک و بزرگ کردن پنل" aria-expanded="true"></button>
@@ -107,6 +109,18 @@
   <div class="tiles-toggle" role="group" aria-label="سبک نقشه">
     <button data-tiles="gray" class="on">ساده</button>
     <button data-tiles="color">رنگی</button>
+    <button data-tiles="3d">سه‌بعدی</button>
+  </div>
+
+  <div id="simBar" class="sim-bar" hidden>
+    <button id="simReplay" class="primary" type="button">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 5v14l11-7z" fill="currentColor"/></svg>
+      پخش دوباره
+    </button>
+    <div class="sim-meta">
+      <span id="simClock"></span>
+      <small id="simSpeed"></small>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
