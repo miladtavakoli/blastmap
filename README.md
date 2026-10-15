@@ -16,6 +16,9 @@ and is meant for civil-defense (پدافند غیرعامل) awareness.
 docker compose up -d --build
 ```
 
+To update a running deployment, run `./deploy.sh`. It pulls the latest code, rebuilds the image
+and restarts the container.
+
 **Locally** (Python 3.12, serves on port 5000):
 
 ```sh
