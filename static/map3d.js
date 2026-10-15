@@ -7,7 +7,7 @@ import * as THREE from "https://unpkg.com/three@0.169.0/build/three.module.js";
 const MAPLIBRE = "https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl";
 const STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const SHOCK_ANIM_S = 3.2; // the shock front always takes this long on screen
-const END_ANIM_S = 22; // effects have faded by now; the render loop stops
+const END_ANIM_S = 32; // effects (and the fires) have faded by now; the render loop stops
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---------- shock arrival time ----------
@@ -302,16 +302,144 @@ class Blast {
     });
 
     for (const ps of this.parts) ps.commit();
+    this.ruins?.update(a, px);
+  }
+
+  setRuins(ruins) {
+    if (this.ruins) { this.scene.remove(this.ruins.group); this.ruins.dispose(); }
+    this.ruins = ruins;
+    this.scene.add(ruins.group);
   }
 
   dispose() {
-    this.scene.traverse((o) => { o.geometry?.dispose(); o.material?.dispose?.(); });
+    this.ruins?.dispose();
+    this.scene.traverse((o) => { if (o.isPoints || o.isInstancedMesh) return; o.geometry?.dispose(); o.material?.dispose?.(); });
     for (const ps of this.parts) ps.dispose();
   }
 }
 
+// ---------- ruins: debris thrown off each building, collapse dust, fires ----------
+// hit: [{x, z, h, size, zone, ta (anim s), dx, dz (unit vector away from the blast)}]
+const RUIN = [ // per zone: chunks, launch speed (m/s), fire chance
+  { chunks: 9, v: [18, 45], fire: 0.75 }, { chunks: 6, v: [8, 22], fire: 0.35 },
+  { chunks: 2, v: [3, 9], fire: 0 }, { chunks: 0, v: [0, 0], fire: 0 },
+];
+const MAX_CHUNKS = 4500, MAX_FIRES = 90;
+const BUILDING_ZOOM = 13; // OpenMapTiles has no buildings below this
+class Ruins {
+  constructor(hit, p) {
+    const rand = rng(hit.length * 17 + 3);
+    this.group = new THREE.Group();
+    const sorted = [...hit].sort((a, b) => a.zone - b.zone || a.ta - b.ta);
+
+    // debris: concrete and brick chunks, lit
+    this.chunks = [];
+    for (const b of sorted) {
+      const spec = RUIN[b.zone];
+      for (let k = 0; k < spec.chunks && this.chunks.length < MAX_CHUNKS; k++) {
+        const v = spec.v[0] + rand() * (spec.v[1] - spec.v[0]);
+        const up = 0.25 + rand() * 0.6, side = (rand() - 0.5) * 0.9;
+        const size = Math.max(0.5, Math.min(7, b.size * (0.07 + rand() * 0.12)));
+        const y0 = b.h * (0.25 + rand() * 0.75);
+        const vx = (b.dx - b.dz * side) * v, vz = (b.dz + b.dx * side) * v, vy = up * v;
+        // when it lands: y0 + vy t - g/2 t² = size/2
+        const tl = (vy + Math.sqrt(vy * vy + 2 * 9.81 * Math.max(0, y0 - size / 2))) / 9.81;
+        this.chunks.push({
+          x: b.x + (rand() - 0.5) * b.size * 0.6, z: b.z + (rand() - 0.5) * b.size * 0.6, y0, vx, vy, vz, tl, size,
+          t0: b.ta + rand() * 0.25, spin: new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(8),
+          sx: 0.6 + rand() * 0.8, sz: 0.6 + rand() * 0.8,
+          c: rand() < 0.3 ? [0.55, 0.36, 0.28] : rand() < 0.5 ? [0.62, 0.6, 0.57] : [0.45, 0.43, 0.41],
+        });
+      }
+    }
+    this.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, this.chunks.length));
+    this.mesh.frustumCulled = false;
+    this.mesh.count = this.chunks.length;
+    const col = new THREE.Color();
+    this.chunks.forEach((c, i) => this.mesh.setColorAt(i, col.setRGB(...c.c)));
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    this.group.add(this.mesh, new THREE.AmbientLight(0xffffff, 1.6));
+    const sun = new THREE.DirectionalLight(0xfff1dc, 1.8);
+    sun.position.set(0.4, 1, 0.3);
+    this.group.add(sun);
+
+    // a dust cloud bursting out of every building that comes down
+    const falling = sorted.filter((b) => b.zone <= 1).slice(0, 700);
+    this.puffs = [];
+    for (const b of falling) for (let k = 0; k < 3; k++)
+      this.puffs.push({ b, ox: (rand() - 0.5) * b.size, oz: (rand() - 0.5) * b.size, s: 0.7 + rand() * 0.7, k: rand() });
+    this.dust = new Particles(this.puffs.length);
+
+    // fires burning in the rubble
+    const sites = sorted.filter((b) => rand() < RUIN[b.zone].fire * (p.nuclear ? 1.3 : 1)).slice(0, MAX_FIRES);
+    this.flames = []; this.smokes = [];
+    for (const b of sites) {
+      const fh = Math.max(3, Math.min(30, b.size * 0.7));
+      const base = b.zone === 0 ? Math.max(1.5, b.h * 0.06) : b.h * 0.45;
+      for (let k = 0; k < 9; k++)
+        this.flames.push({ b, fh, base, ox: (rand() - 0.5) * b.size * 0.6, oz: (rand() - 0.5) * b.size * 0.6, k: rand(), r: 0.8 + rand() * 0.6 });
+      for (let k = 0; k < 7; k++)
+        this.smokes.push({ b, fh, base, ox: (rand() - 0.5) * b.size * 0.4, oz: (rand() - 0.5) * b.size * 0.4, k: rand(), r: 0.8 + rand() * 0.6 });
+    }
+    this.fire = new Particles(this.flames.length, true);
+    this.fireSmoke = new Particles(this.smokes.length);
+    this.parts = [this.dust, this.fireSmoke, this.fire].filter((x) => x.n);
+    for (const x of this.parts) this.group.add(x.obj);
+    this.dummy = new THREE.Object3D();
+  }
+
+  update(a, px) {
+    for (const x of this.parts) x.mat.uniforms.uPx.value = px;
+    const d = this.dummy;
+    this.chunks.forEach((c, i) => {
+      const t = a - c.t0;
+      if (t < 0) { d.scale.setScalar(0); d.position.set(0, -1e4, 0); }
+      else {
+        const tt = Math.min(t, c.tl);
+        d.position.set(c.x + c.vx * tt, Math.max(c.size / 2, c.y0 + c.vy * tt - 4.9 * tt * tt), c.z + c.vz * tt);
+        d.rotation.set(c.spin.x * tt, c.spin.y * tt, c.spin.z * tt);
+        d.scale.set(c.size * c.sx, c.size * 0.7, c.size * c.sz);
+      }
+      d.updateMatrix();
+      this.mesh.setMatrixAt(i, d.matrix);
+    });
+    this.mesh.instanceMatrix.needsUpdate = true;
+
+    this.puffs.forEach((q, i) => {
+      const t = a - q.b.ta - 0.1;
+      if (t < 0) return this.dust.set(i, 0, 0, 0, 0, 0, 0, 0, 0);
+      const k = 1 - Math.exp(-t / 1.6);
+      this.dust.set(i, q.b.x + q.ox * (1 + k), q.b.h * (0.15 + 0.5 * k * q.k), q.b.z + q.oz * (1 + k),
+        q.b.size * (0.6 + 1.4 * k) * q.s, 0.5 * Math.min(1, t * 4) * (1 - smooth(4, 12, t)), 0.62, 0.57, 0.5);
+    });
+
+    const life = 1 - smooth(END_ANIM_S - 9, END_ANIM_S - 1, a);
+    this.flames.forEach((f, i) => {
+      const on = smooth(f.b.ta + 0.6, f.b.ta + 1.8, a) * life;
+      const l = (a * 1.1 * f.r + f.k) % 1;
+      const flick = 0.75 + 0.25 * Math.sin(a * 23 + f.k * 50);
+      this.fire.set(i, f.b.x + f.ox * (1 - l * 0.5), f.base + l * f.fh, f.b.z + f.oz * (1 - l * 0.5),
+        f.fh * 0.55 * (1 - l * 0.6), on * (1 - l) * 0.9 * flick, 1, 0.45 + 0.4 * (1 - l), 0.12);
+    });
+    this.smokes.forEach((sm, i) => {
+      const on = smooth(sm.b.ta + 1, sm.b.ta + 3, a) * life;
+      const l = (a * 0.11 * sm.r + sm.k) % 1;
+      this.fireSmoke.set(i, sm.b.x + sm.ox + l * sm.fh * 1.5, sm.base + sm.fh * (0.6 + l * 7), sm.b.z + sm.oz,
+        sm.fh * (0.6 + 2.2 * l), on * 0.45 * (1 - l) * smooth(0, 0.1, l), 0.24, 0.22, 0.21);
+    });
+    for (const x of this.parts) x.commit();
+  }
+
+  dispose() {
+    this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh.dispose();
+    for (const x of this.parts) x.dispose();
+  }
+}
+
 // ---------- the 3D view ----------
-let map, renderer, camera, layerReady, blast = null, sim = null, buildSrc = null, idsOk = false;
+let map, renderer, camera, blast = null, sim = null, buildSrc = null;
+let poiLayers = []; // the map's own place labels and icons, with their original filters
 const el = (id) => document.getElementById(id);
 
 async function createMap(center, zoom) {
@@ -332,36 +460,42 @@ async function createMap(center, zoom) {
   addLayers();
 }
 
+const EMPTY = { type: "FeatureCollection", features: [] };
+const HEIGHT = ["coalesce", ["get", "render_height"], ["get", "height"], 8];
+const buildingColor = (h) => ["interpolate", ["linear"], h, 0, "#dcd8d2", 60, "#c9cdd1", 200, "#b6bec6"];
+
 function addLayers() {
   const layers = map.getStyle().layers;
   const firstSymbol = layers.find((l) => l.type === "symbol")?.id;
   const bl = layers.filter((l) => l["source-layer"] === "building");
+  poiLayers = layers.filter((l) => l.type === "symbol" && l["source-layer"] === "poi").map((l) => ({ id: l.id, filter: l.filter }));
+  const extrusion = (id, source, extra) => ({
+    id, type: "fill-extrusion", source, ...extra,
+    paint: { "fill-extrusion-color": buildingColor(extra["source-layer"] ? HEIGHT : ["get", "h"]),
+      "fill-extrusion-height": extra["source-layer"] ? HEIGHT : ["get", "h"],
+      "fill-extrusion-base": extra["source-layer"] ? ["coalesce", ["get", "render_min_height"], 0] : ["get", "b"],
+      "fill-extrusion-opacity": 0.92 },
+  });
+  for (const id of ["bm-zones", "bm-city", "bm-damage", "bm-places"]) map.addSource(id, { type: "geojson", data: EMPTY });
   if (bl.length) {
     buildSrc = bl[0].source;
     bl.forEach((l) => map.setLayoutProperty(l.id, "visibility", "none"));
-    const height = ["coalesce", ["get", "render_height"], ["get", "height"], 8];
-    map.addLayer({
-      id: "bm-buildings", type: "fill-extrusion", source: buildSrc, "source-layer": "building", minzoom: 12,
-      paint: {
-        "fill-extrusion-color": ["interpolate", ["linear"], height, 0, "#dcd8d2", 60, "#c9cdd1", 200, "#b6bec6"],
-        "fill-extrusion-height": height,
-        "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
-        "fill-extrusion-opacity": 0.92,
-      },
-    }, firstSymbol);
+    // the map's own buildings, shown while nothing has been blown up
+    map.addLayer(extrusion("bm-buildings", buildSrc, { "source-layer": "building", minzoom: 12 }), firstSymbol);
   }
-  map.addSource("bm-zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  map.addSource("bm-damage", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "bm-zones-fill", type: "fill", source: "bm-zones", filter: ["!=", ["get", "key"], "spread"],
     paint: { "fill-color": ["get", "color"], "fill-opacity": 0 } }, firstSymbol);
   map.addLayer({ id: "bm-zones-line", type: "line", source: "bm-zones",
     paint: { "line-color": ["get", "color"], "line-width": ["case", ["get", "outer"], 2.2, 1.4], "line-opacity": 0 } }, firstSymbol);
   map.addLayer({ id: "bm-spread", type: "line", source: "bm-zones", filter: ["==", ["get", "key"], "spread"],
     paint: { "line-color": ["get", "color"], "line-width": 1.6, "line-dasharray": [3, 3] } }, firstSymbol);
+  // during a blast the buildings come from our own copy: the untouched ones here,
+  // the ones the blast reaches in bm-damage, where they collapse
+  map.addLayer({ ...extrusion("bm-city", "bm-city", {}), layout: { visibility: "none" } }, firstSymbol);
   map.addLayer({
     id: "bm-damage", type: "fill-extrusion", source: "bm-damage",
-    paint: { "fill-extrusion-color": ["get", "color"], "fill-extrusion-height": 0,
-      "fill-extrusion-base": ["get", "b"], "fill-extrusion-opacity": 0.95 },
+    paint: { "fill-extrusion-color": ["get", "c0"], "fill-extrusion-height": ["get", "h"],
+      "fill-extrusion-base": ["get", "b"], "fill-extrusion-opacity": 0.96 },
   }, firstSymbol);
 
   map.addLayer({
@@ -373,8 +507,7 @@ function addLayers() {
     },
     render(gl, matrix) {
       if (!blast || !sim) return;
-      const now = performance.now();
-      const a = reduceMotion ? END_ANIM_S : (now - sim.start) / 1000;
+      const a = reduceMotion ? END_ANIM_S : (performance.now() - sim.start) / 1000;
       const tr = a / sim.p.speed;
       const merc = sim.merc, s = merc.meterInMercatorCoordinateUnits();
       const l = new THREE.Matrix4().makeTranslation(merc.x, merc.y, merc.z)
@@ -386,7 +519,7 @@ function addLayers() {
       const e = new THREE.Vector4(0, 0, 1, 0).applyMatrix4(camera.projectionMatrixInverse);
       const eye = new THREE.Vector3(e.x / e.w, e.y / e.w, e.z / e.w);
       // pixels per metre at w = 1, for particle sizes
-      const c = m_canvasSize();
+      const c = canvasSize();
       const p0 = new THREE.Vector4(0, 0, 0, 1).applyMatrix4(M);
       const p1 = new THREE.Vector4(1, 0, 0, 1).applyMatrix4(M);
       const p2 = new THREE.Vector4(0, 0, 1, 1).applyMatrix4(M);
@@ -401,14 +534,23 @@ function addLayers() {
       if (a < END_ANIM_S) map.triggerRepaint();
     },
   });
+  map.addLayer({ id: "bm-places", type: "circle", source: "bm-places",
+    paint: { "circle-radius": 6, "circle-color": ["get", "color"], "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2, "circle-opacity": 0, "circle-stroke-opacity": 0 } });
+  map.on("moveend", onMoveEnd);
 }
-function m_canvasSize() { const cv = map.getCanvas(); return [cv.clientWidth, cv.clientHeight]; }
+const canvasSize = () => { const cv = map.getCanvas(); return [cv.clientWidth, cv.clientHeight]; };
 
-// ---------- per-frame map updates (zones, building damage, light) ----------
+function useOwnBuildings(on) {
+  if (map.getLayer("bm-buildings")) map.setLayoutProperty("bm-buildings", "visibility", on ? "none" : "visible");
+  map.setLayoutProperty("bm-city", "visibility", on ? "visible" : "none");
+}
+
+// ---------- per-frame map updates (zones, collapsing buildings, light) ----------
 let lastMapTick = -1;
 function tickMap(a, tr) {
   if (!sim) return;
-  updateClock(a, tr);
+  updateClock(tr);
   // the sun briefly takes the fireball's colour
   const glow = reduceMotion ? 0 : Math.exp(-a / (sim.p.nuclear ? 2.5 : 0.6));
   if (glow > 0.01 || !sim.lightReset) {
@@ -416,78 +558,206 @@ function tickMap(a, tr) {
       intensity: 0.5 + 0.4 * glow });
     sim.lightReset = glow <= 0.01;
   }
-  if (performance.now() - lastMapTick < 66 && a < END_ANIM_S) return;
+  // buildings are still falling until ~3 s after the front passes; after that, stop updating
+  const busy = a < SHOCK_ANIM_S + 4;
+  if (!busy && sim.settled) return;
+  const every = sim.hitCount > 1500 ? 66 : 0;
+  if (performance.now() - lastMapTick < every && busy) return;
   lastMapTick = performance.now();
-  const T = tr;
-  map.setPaintProperty("bm-zones-fill", "fill-opacity", ["case", ["<=", ["get", "t"], T], 0.1, 0]);
-  map.setPaintProperty("bm-zones-line", "line-opacity", ["case", ["<=", ["get", "t"], T], 0.9, 0]);
-  map.setPaintProperty("bm-damage", "fill-extrusion-height", ["case", ["<=", ["get", "t"], T], ["get", "h"], 0]);
-  if (map.getLayer("bm-buildings") && idsOk) {
-    const hide = sim.hidden.filter((h) => h.t <= T).map((h) => h.id);
-    if (hide.length !== sim.hiddenShown) {
-      sim.hiddenShown = hide.length;
-      map.setFilter("bm-buildings", hide.length ? ["!", ["in", ["id"], ["literal", hide]]] : null);
+  sim.settled = !busy;
+  const A = a;
+  // labels of places inside the heavy-damage zone go once the front has passed it
+  if (!sim.poiGone && sim.poiArea && A >= sim.poiArea.ta) {
+    sim.poiGone = true;
+    for (const l of poiLayers) {
+      const out = ["!", ["within", sim.poiArea.geom]];
+      map.setFilter(l.id, l.filter ? ["all", l.filter, out] : out);
     }
   }
+  const shown = ["<=", ["get", "ta"], A];
+  map.setPaintProperty("bm-zones-fill", "fill-opacity", ["case", shown, 0.1, 0]);
+  map.setPaintProperty("bm-zones-line", "line-opacity", ["case", shown, 0.9, 0]);
+  map.setPaintProperty("bm-places", "circle-opacity", ["case", shown, 1, 0]);
+  map.setPaintProperty("bm-places", "circle-stroke-opacity", ["case", shown, 1, 0]);
+  const prog = ["min", 1, ["max", 0, ["/", ["-", A, ["get", "ta"]], ["get", "dur"]]]];
+  const ease = ["*", prog, prog]; // falls faster as it goes
+  map.setPaintProperty("bm-damage", "fill-extrusion-height",
+    ["-", ["get", "h"], ["*", ["-", ["get", "h"], ["get", "hf"]], ease]]);
+  map.setPaintProperty("bm-damage", "fill-extrusion-base",
+    ["-", ["get", "b"], ["*", ["-", ["get", "b"], ["get", "bf"]], ease]]);
+  map.setPaintProperty("bm-damage", "fill-extrusion-color",
+    ["interpolate", ["linear"], prog, 0, ["to-color", ["get", "c0"]], 1, ["to-color", ["get", "c1"]]]);
 }
 
 function fmtSec(s) {
   const n = (v, d) => Number(v).toLocaleString("fa-IR", { maximumFractionDigits: d });
   return s < 1 ? `${n(s * 1000, 0)} میلی‌ثانیه` : `${n(s, 2)} ثانیه`;
 }
-function updateClock(a, tr) {
+function updateClock(tr) {
   const p = sim.p;
   el("simClock").textContent = tr < p.Tend ? `زمان واقعی: ${fmtSec(tr)}` : `موج در ${fmtSec(p.Tend)} به لبه‌ی آسیب سبک رسید`;
 }
 
-// ---------- building damage ----------
-const DAMAGE = [ // per zone: overlay colour, height factor when the original can be hidden
-  { color: "#3b302b", h: 0.07 }, { color: "#7b4a35", h: 0.55 }, { color: "#c98a5c", h: 1 }, { color: "#e9dcb6", h: 1 },
+// ---------- what the blast hits ----------
+const ZONE_FA = ["تخریب کامل", "آسیب سنگین", "آسیب متوسط", "آسیب سبک"];
+const ZONE_COLOR = ["#b91c1c", "#ea580c", "#f59e0b", "#facc15"];
+// per zone: final colour, how much of the building is left standing, how long it takes to fall (anim s)
+const LOOK = [
+  { c1: "#4a3d36", keep: 0.05, dur: 1.6 }, // rubble
+  { c1: "#7d5a49", keep: 0.45, dur: 2.0 }, // upper floors gone
+  { c1: "#b49278", keep: 0.88, dur: 0.8 }, // roof and facades torn off
+  { c1: "#e0d4bc", keep: 1, dur: 0.5 }, // windows blown in
 ];
-function buildDamage(p, center) {
-  const out = [], hidden = [];
-  if (!buildSrc) return { features: [], hidden };
-  const feats = map.querySourceFeatures(buildSrc, { sourceLayer: "building" });
-  const seen = new Set();
+function hexLerp(a, b, t) {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+const intactColor = (h) => h <= 60 ? hexLerp("#dcd8d2", "#c9cdd1", h / 60) : hexLerp("#c9cdd1", "#b6bec6", Math.min(1, (h - 60) / 140));
+
+// zone index and arrival (anim s) of the first front to reach a spot x, z (metres from ground zero)
+function reach(p, x, z) {
+  let zone = -1, ta = Infinity;
+  const test = (dx, dz, t0, radii, w) => {
+    const d = Math.hypot(dx, dz);
+    const zi = radii.findIndex((r) => d <= r);
+    if (zi < 0) return;
+    const ti = (t0 + arrival(d, w, p.f)) * p.speed;
+    if (zone < 0 || zi < zone || (zi === zone && ti < ta)) { zone = zi; ta = ti; }
+  };
+  if (p.cluster) p.spots.forEach((s, i) => test(x - s[0], z + s[1], p.stagger[i], p.subRadii, p.w));
+  else test(x, z, 0, p.R, p.w);
+  return [zone, ta];
+}
+
+function collect(p, center) {
+  const city = [], damage = [], hit = [], counted = [new Set(), new Set(), new Set(), new Set()];
+  if (!buildSrc) return { city, damage, hit, counts: [0, 0, 0, 0], places: [] };
   const cosLat = Math.cos((center[0] * Math.PI) / 180);
-  let withId = 0;
-  for (const f of feats) {
+  const toXZ = (lng, lat) => [(lng - center[1]) * M_PER_DEG * cosLat, -(lat - center[0]) * M_PER_DEG];
+  const seen = new Set();
+  for (const f of map.querySourceFeatures(buildSrc, { sourceLayer: "building" })) {
     const g = f.geometry;
     if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) continue;
     const ring = g.type === "Polygon" ? g.coordinates[0] : g.coordinates[0][0];
-    let sx = 0, sy = 0;
-    for (const c of ring) { sx += c[0]; sy += c[1]; }
-    const lng = sx / ring.length, lat = sy / ring.length;
-    const key = f.id != null ? "i" + f.id + ":" + ring.length : ring[0].join();
-    if (seen.has(key)) continue;
+    const h = +(f.properties.render_height ?? f.properties.height ?? 8);
+    const b = +(f.properties.render_min_height ?? 0);
+    const key = `${ring.length}:${ring[0][0].toFixed(7)},${ring[0][1].toFixed(7)}:${h}`;
+    if (seen.has(key)) continue; // the same piece repeated in a neighbouring tile's buffer
     seen.add(key);
-    const x = (lng - center[1]) * M_PER_DEG * cosLat, z = -(lat - center[0]) * M_PER_DEG;
-    // zone and arrival time; for a cluster, the earliest sub-burst that reaches it
-    let zone = -1, t = Infinity;
-    const test = (dx, dz, t0, radii, w) => {
-      const d = Math.hypot(dx, dz);
-      const zi = radii.findIndex((r) => d <= r);
-      if (zi < 0) return;
-      const ti = t0 + arrival(d, w, p.f);
-      if (zone < 0 || zi < zone || (zi === zone && ti < t)) { zone = zi; t = ti; }
-    };
-    if (p.cluster) p.spots.forEach((s, i) => test(x - s[0], z + s[1], p.stagger[i], p.subRadii, p.w));
-    else test(x, z, 0, p.R, p.w);
-    if (zone < 0) continue;
-    const h = f.properties.render_height ?? f.properties.height ?? 8;
-    const b = f.properties.render_min_height ?? 0;
-    if (f.id != null) withId++;
-    out.push({ g, zone, t, h, b, id: f.id });
+    let sx = 0, sz = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const c of ring) {
+      const [x, z] = toXZ(c[0], c[1]);
+      sx += x; sz += z; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
+    }
+    const x = sx / ring.length, z = sz / ring.length;
+    const [zone, ta] = reach(p, x, z);
+    if (zone < 0) { city.push({ type: "Feature", geometry: g, properties: { h, b } }); continue; }
+    const look = LOOK[zone], jitter = 0.8 + 0.4 * ((Math.abs(x * 13.7 + z * 7.3) % 1));
+    const bf = zone === 0 ? 0 : b * look.keep;
+    const hf = zone === 0 ? Math.max(1.2, h * look.keep) : bf + (h - b) * look.keep;
+    damage.push({ type: "Feature", geometry: g, properties: {
+      h, b, hf, bf, ta, dur: look.dur * jitter, c0: intactColor(h),
+      c1: zone === 0 && p.nuclear ? "#2f2723" : look.c1 } });
+    const r = Math.hypot(x, z) || 1;
+    hit.push({ x, z, h, size: Math.max(4, x1 - x0, z1 - z0), zone, ta, dx: x / r, dz: z / r });
+    counted[zone].add(`${Math.round(x / 4)},${Math.round(z / 4)}`);
   }
-  idsOk = out.length > 0 && withId === out.length;
-  const features = out.map((o) => {
-    const d = DAMAGE[o.zone];
-    const collapse = idsOk && o.zone < 2;
-    if (collapse) hidden.push({ id: o.id, t: o.t });
-    return { type: "Feature", geometry: o.g,
-      properties: { color: d.color, t: o.t, b: o.b, h: collapse ? Math.max(o.b + 1.2, o.b + (o.h - o.b) * d.h) : o.h + 0.4 } };
+
+  // named places from the map's points of interest
+  const places = [], seenPlace = new Set();
+  for (const f of map.querySourceFeatures(buildSrc, { sourceLayer: "poi" })) {
+    if (f.geometry?.type !== "Point") continue;
+    const pr = f.properties, name = pr["name:fa"] || pr.name || pr["name:latin"];
+    if (!name) continue;
+    const [lng, lat] = f.geometry.coordinates;
+    const [x, z] = toXZ(lng, lat);
+    const [zone, ta] = reach(p, x, z);
+    if (zone < 0) continue;
+    const k = name + "|" + pr.class;
+    if (seenPlace.has(k)) continue;
+    seenPlace.add(k);
+    places.push({ name, cls: pr.class, sub: pr.subclass, zone, ta, lng, lat });
+  }
+  return { city, damage, hit, counts: counted.map((c) => c.size), places };
+}
+
+// ---------- damage report in the panel ----------
+const PLACE_FA = {
+  hospital: "بیمارستان", school: "مدرسه", college: "دانشگاه", kindergarten: "مهدکودک", place_of_worship: "عبادتگاه",
+  fire_station: "آتش‌نشانی", police: "پلیس", fuel: "پمپ بنزین", bank: "بانک", pharmacy: "داروخانه",
+  library: "کتابخانه", town_hall: "ساختمان دولتی", shop: "فروشگاه", grocery: "فروشگاه", restaurant: "رستوران",
+  cafe: "کافه", fast_food: "رستوران", lodging: "هتل", park: "پارک", attraction: "جاذبه", museum: "موزه",
+  stadium: "ورزشگاه", bus: "ایستگاه اتوبوس", railway: "ایستگاه", parking: "پارکینگ", cinema: "سینما",
+};
+const PLACE_RANK = ["hospital", "school", "kindergarten", "college", "fire_station", "police", "place_of_worship", "fuel", "pharmacy"];
+const rank = (c) => { const i = PLACE_RANK.indexOf(c); return i < 0 ? 99 : i; };
+
+function report(counts, places) {
+  const box = el("damage3d");
+  if (!box) return;
+  const fa = (n) => Number(n).toLocaleString("fa-IR");
+  const stats = el("damageStats");
+  stats.replaceChildren();
+  counts.forEach((n, i) => {
+    const row = document.createElement("div");
+    row.className = "dmg-row";
+    const dot = document.createElement("i");
+    dot.style.background = ZONE_COLOR[i];
+    const name = document.createElement("span");
+    name.textContent = ZONE_FA[i];
+    const val = document.createElement("b");
+    val.textContent = n ? fa(n) : "—";
+    row.append(dot, name, val);
+    stats.appendChild(row);
   });
-  return { features, hidden };
+  const list = el("damagePlaces");
+  list.replaceChildren();
+  const top = [...places].sort((a, b) => a.zone - b.zone || rank(a.cls) - rank(b.cls)).slice(0, 12);
+  for (const pl of top) {
+    const li = document.createElement("li");
+    const dot = document.createElement("i");
+    dot.style.background = ZONE_COLOR[pl.zone];
+    const name = document.createElement("span");
+    name.textContent = pl.name;
+    const kind = document.createElement("small");
+    kind.textContent = [PLACE_FA[pl.cls] || PLACE_FA[pl.sub], ZONE_FA[pl.zone]].filter(Boolean).join(" · ");
+    li.append(dot, name, kind);
+    li.addEventListener("click", () => map.easeTo({ center: [pl.lng, pl.lat], zoom: Math.max(map.getZoom(), 16.5) }));
+    list.appendChild(li);
+  }
+  el("damagePlacesTitle").hidden = !top.length;
+  el("damageZoomHint").hidden = map.getZoom() >= BUILDING_ZOOM;
+  el("damagePlacesTitle").textContent = places.length > top.length
+    ? `اماکن نام‌دار در محدوده (${fa(top.length)} از ${fa(places.length)})` : "اماکن نام‌دار در محدوده";
+  box.hidden = false;
+}
+
+function applyCollected(p, point, { fresh }) {
+  const c = collect(p, point);
+  map.getSource("bm-city").setData({ type: "FeatureCollection", features: c.city });
+  map.getSource("bm-damage").setData({ type: "FeatureCollection", features: c.damage });
+  map.getSource("bm-places").setData({ type: "FeatureCollection", features: c.places.map((pl) => ({
+    type: "Feature", geometry: { type: "Point", coordinates: [pl.lng, pl.lat] },
+    properties: { color: ZONE_COLOR[pl.zone], ta: pl.ta } })) });
+  useOwnBuildings(true);
+  blast.setRuins(new Ruins(c.hit, p));
+  sim.hitCount = c.hit.length;
+  sim.settled = false; lastMapTick = -1;
+  report(c.counts, c.places);
+  if (!fresh) map.triggerRepaint();
+}
+
+// the user moved the map: newly loaded tiles may hold more of the damaged area
+let moveTimer;
+function onMoveEnd() {
+  if (!sim?.ready) return;
+  clearTimeout(moveTimer);
+  const id = runId;
+  moveTimer = setTimeout(async () => {
+    await waitIdle(3000);
+    if (id === runId && sim?.ready) applyCollected(sim.p, sim.point, { fresh: false });
+  }, 400);
 }
 
 // ---------- public API ----------
@@ -526,28 +796,30 @@ function zoneFeatures(point, zones, p) {
     const each = zones.filter((z) => z.each);
     p.spots.forEach((s, i) => [...each].reverse().forEach((z) => feats.push({
       type: "Feature", geometry: { type: "Polygon", coordinates: [circle(point, z.radius_m, s[0], -s[1], 20)] },
-      properties: { color: z.color, key: z.key, outer: false, t: p.stagger[i] + arrival(z.radius_m, p.w, p.f) },
+      properties: { color: z.color, key: z.key, outer: false, ta: (p.stagger[i] + arrival(z.radius_m, p.w, p.f)) * p.speed },
     })));
   }
   [...main].reverse().forEach((z, i) => feats.push({
     type: "Feature", geometry: { type: "Polygon", coordinates: [circle(point, z.radius_m)] },
-    properties: { color: z.color, key: z.key, outer: i === 0, t: arrival(z.radius_m, p.w, p.f) },
+    properties: { color: z.color, key: z.key, outer: i === 0, ta: arrival(z.radius_m, p.w, p.f) * p.speed },
   }));
   const sp = zones.find((z) => z.key === "spread");
   if (sp) feats.push({ type: "Feature", geometry: { type: "Polygon", coordinates: [circle(point, sp.radius_m)] },
-    properties: { color: sp.color, key: "spread", outer: true, t: 0 } });
+    properties: { color: sp.color, key: "spread", outer: true, ta: 0 } });
   return { type: "FeatureCollection", features: feats };
 }
 
 function frame(point, p) {
   const viewR = Math.max(p.Rlight * 1.25, p.Hc * 0.75, 60);
-  const [w, h] = m_canvasSize();
+  const [w, h] = canvasSize();
   const mobile = window.innerWidth <= 720;
   const avail = mobile ? Math.min(w, h * 0.55) : Math.min(w - 400, h);
   const mpp = (viewR * 2) / Math.max(200, avail * 0.9);
   const zoom = Math.log2((40075016.686 * Math.cos((point[0] * Math.PI) / 180)) / (512 * mpp)) + 0.2;
+  // buildings only exist in the map's tiles from zoom 13, so stay close enough to see them fall
+  const minZoom = buildSrc ? BUILDING_ZOOM + 0.6 : 3;
   return {
-    center: [point[1], point[0]], zoom: Math.max(3, Math.min(18, zoom)), pitch: p.Hc ? 62 : 58,
+    center: [point[1], point[0]], zoom: Math.max(minZoom, Math.min(18, zoom)), pitch: p.Hc ? 62 : 58,
     bearing: map.getBearing() || -20,
     padding: mobile ? { bottom: Math.round(h * 0.4), top: 40 } : { right: 390, top: 40 },
   };
@@ -560,14 +832,23 @@ function waitIdle(ms) {
   });
 }
 
+function restorePoi() { for (const l of poiLayers) map.setFilter(l.id, l.filter ?? null); }
+
+function reset() {
+  runId++;
+  restorePoi();
+  blast?.dispose(); blast = null; sim = null;
+  for (const id of ["bm-zones", "bm-city", "bm-damage", "bm-places"]) map.getSource(id).setData(EMPTY);
+  useOwnBuildings(false);
+  el("damage3d").hidden = true;
+}
+
 let runId = 0;
 async function play(point, zones, tnt, burst, spots, { fly = true } = {}) {
-  const id = ++runId;
+  reset();
+  const id = runId;
   const p = params(point, zones, tnt, burst, spots);
-  blast?.dispose(); blast = null; sim = null;
   map.getSource("bm-zones").setData(zoneFeatures(point, zones, p));
-  map.getSource("bm-damage").setData({ type: "FeatureCollection", features: [] });
-  if (map.getLayer("bm-buildings")) map.setFilter("bm-buildings", null);
   el("simBar").hidden = false;
   el("simClock").textContent = "در حال آماده‌سازی…";
   const sp = p.speed;
@@ -582,12 +863,14 @@ async function play(point, zones, tnt, burst, spots, { fly = true } = {}) {
   await waitIdle(4000);
   if (id !== runId) return;
 
-  const { features, hidden } = buildDamage(p, point);
-  map.getSource("bm-damage").setData({ type: "FeatureCollection", features });
   blast = new Blast(p);
-  sim = { p, start: performance.now(), hidden, hiddenShown: -1, lightReset: false,
-    merc: window.maplibregl.MercatorCoordinate.fromLngLat([point[1], point[0]], 0) };
-  lastMapTick = -1;
+  sim = { p, point, start: performance.now(), lightReset: false, hitCount: 0, settled: false,
+    merc: window.maplibregl.MercatorCoordinate.fromLngLat([point[1], point[0]], 0),
+    poiArea: p.cluster ? null : { ta: arrival(p.R[1], p.w, p.f) * p.speed,
+      geom: { type: "Polygon", coordinates: [circle(point, p.R[1])] } } };
+  applyCollected(p, point, { fresh: true });
+  sim.start = performance.now(); // collecting can take a moment on a dense city
+  sim.ready = true;
   if (!reduceMotion) flash(p);
   map.triggerRepaint();
 }
@@ -615,6 +898,7 @@ export async function enter(center, zoom) {
 export function exit() {
   document.body.classList.remove("mode-3d");
   el("simBar").hidden = true;
+  el("damage3d").hidden = true;
   const c = map?.getCenter();
   return c ? { center: [c.lat, c.lng], zoom: map.getZoom() + 1 } : null;
 }
@@ -624,10 +908,7 @@ export function show(point, zones, tnt, burst, spots) {
   last = point ? [point, zones, tnt, burst, spots] : null;
   if (!map || !document.body.classList.contains("mode-3d")) return;
   if (!point) {
-    runId++; blast?.dispose(); blast = null; sim = null;
-    map.getSource("bm-zones").setData({ type: "FeatureCollection", features: [] });
-    map.getSource("bm-damage").setData({ type: "FeatureCollection", features: [] });
-    if (map.getLayer("bm-buildings")) map.setFilter("bm-buildings", null);
+    reset();
     el("simBar").hidden = true;
     return;
   }
