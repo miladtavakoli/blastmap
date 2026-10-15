@@ -108,7 +108,8 @@ window.blastApp = {
 };
 
 // ---------- mobile sheet ----------
-// tap the handle: minimize ↔ open; swipe up/down on it: step between minimized / half / full
+// tap the handle: minimize ↔ open; swipe up/down on it: step between minimized / half / full.
+// The header buttons do the same: minimize ↔ open, and full screen ↔ normal size.
 const SHEET = ["collapsed", "half", "full"];
 let sheet = 1, dragY = null;
 function setSheet(i) {
@@ -116,7 +117,11 @@ function setSheet(i) {
   $("panel").classList.remove(...SHEET);
   $("panel").classList.add(SHEET[sheet]);
   $("sheetHandle").setAttribute("aria-expanded", sheet > 0);
+  $("sheetMin").setAttribute("aria-label", sheet ? "کوچک کردن پنل" : "باز کردن پنل");
+  $("sheetMax").setAttribute("aria-label", sheet === 2 ? "اندازه‌ی معمولی پنل" : "تمام‌صفحه کردن پنل");
 }
+$("sheetMin").addEventListener("click", () => setSheet(sheet ? 0 : 1));
+$("sheetMax").addEventListener("click", () => setSheet(sheet === 2 ? 1 : 2));
 $("sheetHandle").addEventListener("pointerdown", (e) => {
   dragY = e.clientY;
   e.target.setPointerCapture(e.pointerId);
@@ -130,7 +135,7 @@ $("sheetHandle").addEventListener("pointerup", (e) => {
 $("sheetHandle").addEventListener("click", (e) => e.detail || setSheet(sheet ? 0 : 1));
 // tapping anywhere on a minimized sheet (e.g. the search box) opens it
 $("panel").addEventListener("click", (e) => {
-  if (sheet === 0 && e.target !== $("sheetHandle")) setSheet(1);
+  if (sheet === 0 && !e.target.closest("#sheetHandle, .sheet-btns")) setSheet(1);
 });
 
 // ---------- presets ----------

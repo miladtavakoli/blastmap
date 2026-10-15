@@ -62,7 +62,7 @@ body {
   overflow-y: auto;
   scrollbar-width: thin;
 }
-#sheetHandle { display: none; }
+#sheetHandle, .sheet-btns { display: none; }
 
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand h1 {
@@ -330,6 +330,15 @@ body.mode-3d .sim-bar { margin-left: 52px; } /* clear of the zoom/compass button
     content: ""; display: block; width: 44px; height: 5px; margin: auto;
     border-radius: 3px; background: var(--ink-3); opacity: .5;
   }
+  .sheet-btns { display: flex; gap: 6px; margin-right: auto; }
+  .sheet-btns button {
+    width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--r-sm);
+    background: var(--field); color: var(--ink-2); cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .sheet-btns svg { transition: transform .2s; }
+  /* arrows point the way the next tap moves the panel */
+  #panel.collapsed #sheetMin svg, #panel.full #sheetMax svg { transform: rotate(180deg); }
   .brand h1 { font-size: 24px; }
   .mark { width: 30px; height: 30px; }
   .mark i:nth-child(1) { width: 30px; height: 30px; }
